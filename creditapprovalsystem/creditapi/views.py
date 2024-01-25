@@ -59,18 +59,18 @@ def register(request):
 
 
         # print(customer_data)
-        customer_data['monthly_salary'] = np.around(customer_data['monthly_salary'])
-        customer_data["approved_limit"] = 36 * customer_data['monthly_salary']
+        customer_data['monthly_salary'] = np.round(customer_data['monthly_salary'])
+        customer_data["approved_limit"] = np.round((36 * customer_data['monthly_salary'])/100000) * 100000
         customer_serializer = CustomerSerializer(data = customer_data)
         # return JsonResponse(customer_serializer, safe= False)
         if customer_serializer.is_valid():
             record = customer_serializer.save()
             data['customer_id'] = record.customer_id
             data['name'] = record.first_name + " " + record.last_name
+            data['phone_number'] = record.phone_number
             data['age'] = record.age
             data['monthly_salary'] = record.monthly_salary
             data['approved_limit'] = record.approved_limit
-            data['phone_number'] = record.phone_number
             return JsonResponse(data, safe= False)
     data['message'] = 'Record Not Saved'
     return JsonResponse(data, safe= False)
