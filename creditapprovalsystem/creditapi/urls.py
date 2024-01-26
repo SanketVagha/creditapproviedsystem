@@ -11,7 +11,8 @@ from creditapi import views
 
 urlpatterns = [
     path('register', views.register),
-    path('check-eligibility', views.checkeligibility)
+    path('check-eligibility', views.checkeligibility),
+    path('create-loan', views.createloan)
     # path('', include(router.urls))
 
 ]

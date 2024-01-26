@@ -44,26 +44,35 @@ def loanApproved(customerid):
     return loan_approved
 
 def approved_limit(customerid):
-    limit = Customer.objects.only('customerid').filter(customer_id= customerid)
-    return limit
-@async_to_sync
-async def current_loan_amount(customerid):
-    loan_amount = await Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("loan_amount"))["loan_amount"]
-    print(loan_amount)
+    limit = Customer.objects.only('approved_limit').filter(customer_id= customerid).first()
+    if limit:
+        return int(limit.approved_limit)
+    return 0
+def current_loan_amount(customerid):
+    customer_count = Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).count()
+    loan_amount = 0
+    if customer_count > 0:
+        loan_amount = Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("loan_amount"))["loan_amount__sum"]
     return loan_amount
 
 def current_loan_emi(customerid):
-    loan_emi_amount = Loan.objects.only("monthly_installment").filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("monthly_installment"))
+    loan_emi_amount = 0
+    customer_count = Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).count()
+    if customer_count > 0:
+        loan_emi_amount = Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("monthly_installment"))['monthly_installment__sum']
+    
     return loan_emi_amount
 
 def customer_salary(customerid):
-        customer_salary = Customer.objects.only("monthly_salary").filter(customer_id = customerid)
-        return customer_salary
-
+        customer_salary = Customer.objects.only("monthly_salary").filter(customer_id = customerid).first()
+        if customer_salary:
+            return int(customer_salary.monthly_salary)
+        return 0
 
 def get_credit_score(customerid, loan_request):
         customer_limit = approved_limit(customerid)
         current_loan_amounts = current_loan_amount(customerid)
+        # print(type(customer_limit))
         salary = customer_salary(customerid)
         loan_emi = current_loan_emi(customerid)
         paidOnTimeLoan =  pastLoanPaidOnTime(customerid)
@@ -71,8 +80,8 @@ def get_credit_score(customerid, loan_request):
 
         data = {}
         credit_score = 0
-
-        if (current_loan_amounts + loan_request ) > customer_limit:
+        total_current_loan_amount = current_loan_amounts + loan_request
+        if total_current_loan_amount > customer_limit:
             data['message'] = "Loan Limit Not Available"
             return JsonResponse(data, safe= False)
 
@@ -80,17 +89,24 @@ def get_credit_score(customerid, loan_request):
         if((salary/2) < loan_emi):
             data['message'] = "EMI Amount Greater Then Salary Not Approved"
             return JsonResponse(data= data, safe= False)
-
-        credit_score = (50 * (paidOnTimeLoan/pastloan)) + (50 * (current_loan_amounts/customer_limit))
+        
+        if(pastloan == 0):
+            return 30
+        else:
+            credit_score = (50 * (paidOnTimeLoan/pastloan)) + (50 * (current_loan_amounts/customer_limit))
         
         return credit_score
 
 
 def monthly_emi_installment(loan_amount,interest_rate,tenure):
-    
-        interest_rate = interest_rate / (12*100)
-        monthly_installment = (loan_amount * interest_rate * ((1+interest_rate)**tenure)) / (interest_rate ** interest_rate)
-        return monthly_installment
+
+    # Convert annual interest rate to monthly and percentage to decimal
+    monthly_interest_rate = (interest_rate / 12) / 100
+
+    # Calculate the monthly installment using the loan amortization formula
+    monthly_installment = loan_amount * (monthly_interest_rate * (1 + monthly_interest_rate)**tenure) / ((1 + monthly_interest_rate)**tenure - 1)
+
+    return round(monthly_installment, 2)
 
 
 @csrf_exempt
@@ -196,17 +212,86 @@ def checkeligibility(request):
             return JsonResponse(data, safe= False)
         
 
-        score = get_credit_score(customer_data['customer_id'], customer_data['loan_amount'])
+        credit_score = get_credit_score(customer_data['customer_id'], customer_data['loan_amount'])
 
-        if score < 10:
+        if credit_score < 10:
             data['message'] = "Credit Score Less Not Approved"
             return JsonResponse(data= data, safe= False)
         
-        if  30 > score and score >= 10:
+        if  30 > credit_score and credit_score >= 10:
             if customer_data['interest_rate'] < 16:
                 data['message'] = "Interest Rate At List 16% Required"
                 return JsonResponse(data= data, safe= False)
-        if 50 > score and score >= 30:
+        if 50 > credit_score and credit_score >= 30:
+            if customer_data['interest_rate'] < 12:
+                data['message'] = "Interest Rate At List 12% Required"
+                return JsonResponse(data= data, safe= False)
+        
+        monthly_installment =  monthly_emi_installment(customer_data['loan_amount'], customer_data['interest_rate'], customer_data['tenure'])
+
+
+        customer_data['monthly_installment'] = round(monthly_installment,2)
+        customer_data['approval'] = 1
+
+        
+        customer_data['start_date'] = datetime.today().strftime("%Y-%m-%d")
+        customer_data['end_date'] = (datetime.today() + relativedelta(months=customer_data['tenure'])).strftime("%Y-%m-%d")
+        customer_data['credit_score'] = credit_score
+
+
+        return JsonResponse(data= customer_data, safe= False)
+
+        #   Data Insert in database and all New keys arange acording to table attribute in database
+
+@csrf_exempt
+def createloan(request):
+    if request.method == 'POST':
+        customer_data = JSONParser().parse(request)
+        data = {}
+        if not customer_data['customer_id']:
+            data['message'] = "Customer Id Empty"
+            return JsonResponse(data, safe= False)
+        
+        if customerid_validation(customer_data['customer_id']) == 0:
+            data['message'] = "Customer Id Invalid"
+            return JsonResponse(data, safe= False)
+
+        if not customer_data['loan_amount']:
+            data['message'] = "Loan Amount Empty"
+            return JsonResponse(data, safe= False)
+        
+        if customer_data['loan_amount'] <= 0:
+            data['message'] = "Loan Amount Invalid"
+            return JsonResponse(data, safe= False)
+
+        if not customer_data['interest_rate']:
+            data['message'] = "Interest Rate Empty"
+            return JsonResponse(data, safe= False)
+        
+        if customer_data['interest_rate'] < 0:
+            data['message'] = "Interest Rate Invalid"
+            return JsonResponse(data, safe= False)
+
+        if not customer_data['tenure']:
+            data['message'] = "Tenure Empty"
+            return JsonResponse(data, safe= False)
+
+        if customer_data['tenure'] <= 0 :
+            data['message'] = "Tenure Invalid"
+            return JsonResponse(data, safe= False)
+        
+
+        credit_score = get_credit_score(customer_data['customer_id'], customer_data['loan_amount'])
+
+        if credit_score < 10:
+            data['message'] = "Credit Score Less Not Approved"
+            return JsonResponse(data= data, safe= False)
+        
+        if  30 > credit_score and credit_score >= 10:
+            if customer_data['interest_rate'] < 16:
+                data['message'] = "Interest Rate At List 16% Required"
+                return JsonResponse(data= data, safe= False)
+        if 50 > credit_score and credit_score >= 30:
             if customer_data['interest_rate'] < 12:
                 data['message'] = "Interest Rate At List 12% Required"
                 return JsonResponse(data= data, safe= False)
@@ -219,13 +304,24 @@ def checkeligibility(request):
 
         
         customer_data['start_date'] = datetime.today().strftime("%Y-%m-%d")
-        customer_data['end_date'] = (customer_data['start_date'] + relativedelta(months=customer_data['tenure']))
-        customer_data['score'] = score
+        customer_data['end_date'] = (datetime.today() + relativedelta(months=customer_data['tenure'])).strftime("%Y-%m-%d")
+        # customer_data['credit_score'] = credit_score
+        customer_data['approval'] = 1
+        customer_data['emi_paid_on_time'] = 0
 
 
-        return JsonResponse(data= customer_data, safe= False)
+        loan_serializer = LoanSerializer(data= customer_data)
+
+        if(loan_serializer.is_valid()):
+            record = loan_serializer.save()
+            data['loan_id'] = record.loan_id
+            data['customer_id'] = record.customer_id
+            data['approval'] = record.approval
+            data['monthly_installment']= record.monthly_installment
+
+            return JsonResponse(data= customer_data, safe= False)
+        data['message'] = 'Record Not Saved'
+        return JsonResponse(data, safe= False)
 
         #   Data Insert in database and all New keys arange acording to table attribute in database
-
-
 
