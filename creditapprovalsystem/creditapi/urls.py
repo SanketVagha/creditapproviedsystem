@@ -10,7 +10,8 @@ from creditapi import views
 # router.register(r'register', register)
 
 urlpatterns = [
-    path('register', views.register)
+    path('register', views.register),
+    path('check-eligibility', views.checkeligibility)
     # path('', include(router.urls))
 
 ]

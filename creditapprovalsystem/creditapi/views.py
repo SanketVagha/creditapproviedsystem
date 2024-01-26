@@ -3,10 +3,15 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.parsers import JSONParser
 from django.http.response import JsonResponse
 from django.db.models import Sum
+from django.db.models import F
 
 from creditapi.models import Customer,Loan
 from creditapi.serializers import CustomerSerializer, LoanSerializer
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+
+from asgiref.sync import async_to_sync
 
 
 import numpy as np
@@ -18,36 +23,37 @@ def customerid_validation(customerid):
     return no_of_customer_id
 
 def pastLoanPaidOnTime(customerid):
-    loan_pay_on_time =  Loan.objects.filter(emi_paid_on_time= Loan.tenure, customer_id = customerid, end_date__lt = (datetime.now().date)).count()
+    loan_pay_on_time =  Loan.objects.only("emi_paid_on_time").filter(emi_paid_on_time= F("tenure"), customer_id = customerid, end_date__lt = datetime.today().strftime("%Y-%m-%d")).count()
     return loan_pay_on_time
 
 def pastLoanTaken(customerid):
-    past_loans = Loan.objects.filter(customer_id = customerid, end_date__lt = (datetime.now().date)).count()
+    past_loans = Loan.objects.only("loan_id").filter(customer_id = customerid, end_date__lt = datetime.today().strftime("%Y-%m-%d")).count()
     return past_loans
 
 def loalApproved(customerid):
-    loan_approved = Loan.objects.filter(customer_id= customerid, approval= 1).count()
+    loan_approved = Loan.objects.only("loan_id").filter(customer_id= customerid, approval= 1).count()
     return loan_approved
 
 
 def activeLoan(customerid):
-    current_loans = Loan.objects.filter(customer_id = customerid, end_date__gte = (datetime.now().date)).count()
+    current_loans = Loan.objects.only("loan_id").filter(customer_id = customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).count()
     return current_loans
 
 def loanApproved(customerid):
-    loan_approved = Loan.objects.filter(customer_id = customerid, approval = 1).count()
+    loan_approved = Loan.objects.only("loan_id").filter(customer_id = customerid, approval = 1).count()
     return loan_approved
 
 def approved_limit(customerid):
     limit = Customer.objects.only('customerid').filter(customer_id= customerid)
     return limit
-
-def current_loan_amount(customerid):
-    loan_amount = Loan.objects.only("loan_amount").filter(customer_id= customerid, end_date__gte = (datetime.now().date)).aggregate(Sum('loan_amount'))
+@async_to_sync
+async def current_loan_amount(customerid):
+    loan_amount = await Loan.objects.filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("loan_amount"))["loan_amount"]
+    print(loan_amount)
     return loan_amount
 
 def current_loan_emi(customerid):
-    loan_emi_amount = Loan.objects.only("monthly_installment").filter(customer_id= customerid, end_date__gte = (datetime.now().date)).aggregate(Sum('monthly_installment'))
+    loan_emi_amount = Loan.objects.only("monthly_installment").filter(customer_id= customerid, end_date__gte = datetime.today().strftime("%Y-%m-%d")).aaggregate(Sum("monthly_installment"))
     return loan_emi_amount
 
 def customer_salary(customerid):
@@ -85,6 +91,8 @@ def monthly_emi_installment(loan_amount,interest_rate,tenure):
         interest_rate = interest_rate / (12*100)
         monthly_installment = (loan_amount * interest_rate * ((1+interest_rate)**tenure)) / (interest_rate ** interest_rate)
         return monthly_installment
+
+
 @csrf_exempt
 
 
@@ -149,6 +157,7 @@ def register(request):
     data['message'] = 'Record Not Saved'
     return JsonResponse(data, safe= False)
 
+@csrf_exempt
 
 def checkeligibility(request):
     if request.method == 'POST':
@@ -158,7 +167,7 @@ def checkeligibility(request):
             data['message'] = "Customer Id Empty"
             return JsonResponse(data, safe= False)
         
-        if customerid_validation(customer_data['customer_id']) != 0:
+        if customerid_validation(customer_data['customer_id']) == 0:
             data['message'] = "Customer Id Invalid"
             return JsonResponse(data, safe= False)
 
@@ -207,7 +216,14 @@ def checkeligibility(request):
 
         customer_data['monthly_installment'] = monthly_installment
         customer_data['approval'] = 1
-        customer_data['start_date'] = (datetime.now().date)
+
+        
+        customer_data['start_date'] = datetime.today().strftime("%Y-%m-%d")
+        customer_data['end_date'] = (customer_data['start_date'] + relativedelta(months=customer_data['tenure']))
+        customer_data['score'] = score
+
+
+        return JsonResponse(data= customer_data, safe= False)
 
         #   Data Insert in database and all New keys arange acording to table attribute in database
 
