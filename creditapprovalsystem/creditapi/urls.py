@@ -12,7 +12,9 @@ from creditapi import views
 urlpatterns = [
     path('register', views.register),
     path('check-eligibility', views.checkeligibility),
-    path('create-loan', views.createloan)
+    path('create-loan', views.createloan),
+    path('view-loan/<int:loan_id>', views.loanDetails),
+    path('view-loans/<int:customer_id>', views.customerLoanDetails)
     # path('', include(router.urls))
 
 ]
