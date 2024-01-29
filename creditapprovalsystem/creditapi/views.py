@@ -217,10 +217,10 @@ def checkeligibility(request):
             data['message'] = "Tenure Invalid"
             return JsonResponse(data, safe= False)
         
-        current_loan_amounts = current_loan_amount(data['customer_id'])
-        salary = customer_salary(data['customer_id'])
-        customer_limit = approved_limit(data['customer_id'])
-        loan_emi = current_loan_emi(data['customer_id'])
+        current_loan_amounts = current_loan_amount(customer_data['customer_id'])
+        salary = customer_salary(customer_data['customer_id'])
+        customer_limit = approved_limit(customer_data['customer_id'])
+        loan_emi = current_loan_emi(customer_data['customer_id'])
 
         if(current_loan_amounts + customer_data['loan_amount']) > customer_limit :
             data['message'] = "Loan Limit Not Available"
